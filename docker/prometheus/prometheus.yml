@@ -7,13 +7,9 @@ scrape_configs:
     static_configs:
       - targets:
           - spark-master:8090
-          - spark-worker-0:8090
-          - spark-worker-1:8090
-          - spark-worker-2:8090
-          - spark-worker-3:8090
-          - spark-worker-4:8090
+          - spark-worker:8090
+
     metric_relabel_configs:
-      # drop per-task histograms to keep TS count < 50 k
       - source_labels: [__name__]
         regex: '.*driver.BlockManager.*|.*executor.*shuffle.*'
         action: drop

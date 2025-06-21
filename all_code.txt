@@ -1,0 +1,226 @@
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: 'spark'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - spark-master:8090
+          - spark-worker-0:8090
+          - spark-worker-1:8090
+          - spark-worker-2:8090
+          - spark-worker-3:8090
+          - spark-worker-4:8090
+    metric_relabel_configs:
+      # drop per-task histograms to keep TS count < 50 k
+      - source_labels: [__name__]
+        regex: '.*driver.BlockManager.*|.*executor.*shuffle.*'
+        action: drop
+#!/usr/bin/env bash
+export SPARK_WORKER_CORES=2
+export SPARK_DAEMON_MEMORY=512m
+export SPARK_DRIVER_MEMORY=512m
+export SPARK_EXECUTOR_MEMORY=256m
+export SPARK_MASTER_HOST=spark-master
+export SPARK_LOCAL_DIRS=/tmp/spark
+export SPARK_JARS_DIR=/opt/spark-jars
+export SPARK_CONF_DIR=/opt/bitnami/spark/conf
+export SPARK_PUBLIC_DNS=localhost
+# Perf flags
+export SPARK_JAVA_OPTS="-Dspark.shuffle.compress=true -Dspark.io.compression.codec=lz4"startDelaySeconds: 0
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+set -e
+chown -R 1001:0 /opt/bitnami/spark
+exec /opt/bitnami/scripts/spark/entrypoint.sh "$@"
+import argparse
+from pyspark.sql import SparkSession
+from pyspark.ml.clustering import KMeans
+from pyspark.ml.feature import VectorAssembler
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Distributed KMeans using PySpark")
+    parser.add_argument("--input", required=True, help="Path to CSV dataset")
+    parser.add_argument("--k", type=int, default=10, help="Number of clusters")
+    parser.add_argument("--output", help="Path to save the model")
+    args = parser.parse_args()
+
+    spark = SparkSession.builder.appName("DistributedKMeans").getOrCreate()
+
+    # Load CSV and assemble features
+    df = spark.read.csv(args.input, header=True, inferSchema=True)
+    features = df.columns
+    assembler = VectorAssembler(inputCols=features, outputCol="features")
+    assembled = assembler.transform(df).select("features")
+
+    kmeans = KMeans(k=args.k, seed=1)
+    model = kmeans.fit(assembled)
+
+    if args.output:
+        model.save(args.output)
+
+    print("Cluster Centers:")
+    for center in model.clusterCenters():
+        print(center)
+
+    spark.stop()
+
+
+if __name__ == "__main__":
+    main()
+# experiments/run_single.sh
+#!/usr/bin/env bash
+set -e
+docker compose up -d --build --scale spark-worker=1
+sleep 10
+docker compose exec spark-master \
+  spark-submit /opt/spark-apps/spark_kmeans.py --input hdfs:///data/higgs/part-*.csv --k 20
+# experiments/run_five.sh
+#!/usr/bin/env bash
+set -e
+docker compose up -d --build --scale spark-worker=5
+sleep 10
+docker compose exec spark-master \
+  spark-submit /opt/spark-apps/spark_kmeans.py --input hdfs:///data/higgs/part-*.csv --k 20
+# experiments/run_two.sh
+#!/usr/bin/env bash
+set -e
+docker compose up -d --build --scale spark-worker=2
+sleep 10
+docker compose exec spark-master \
+  spark-submit /opt/spark-apps/spark_kmeans.py --input hdfs:///data/higgs/part-*.csv --k 20
+version: "3.9"
+
+services:
+  spark-master:
+    image: bitnami/spark:latest            # official Bitnami Spark image
+    build: ./docker/spark
+    hostname: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_METRICS_CONF_FILE=/opt/bitnami/spark/conf/metrics.properties
+      - EXTRA_JAVA_OPTIONS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8090:/opt/jmx/config.yaml
+    volumes:
+      - ./docker/spark/spark-env.sh:/opt/bitnami/spark/conf/spark-env.sh
+      - ./docker/spark/metrics.properties:/opt/bitnami/spark/conf/metrics.properties
+      - ./docker/spark/config.yaml:/opt/jmx/config.yaml
+      - ./src:/opt/spark-apps
+      - jmx:/opt/jmx
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+      - "8090:8090"      # JMX → Prometheus
+    networks: [snet]
+
+  spark-worker:
+    image: bitnami/spark:latest
+    build: ./docker/spark
+    depends_on: [spark-master]
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=256m         # matches assignment limit
+      - EXTRA_JAVA_OPTIONS=-javaagent:/opt/jmx/jmx_prometheus_javaagent.jar=8090:/opt/jmx/config.yaml
+    volumes:
+      - ./docker/spark/spark-env.sh:/opt/bitnami/spark/conf/spark-env.sh
+      - ./docker/spark/metrics.properties:/opt/bitnami/spark/conf/metrics.properties
+      - ./docker/spark/config.yaml:/opt/jmx/config.yaml
+      - jmx:/opt/jmx
+    networks: [snet]
+    deploy:
+      replicas: 4                        # gives 5 workers total; override with `--scale` when needed
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports: ["9090:9090"]
+    networks: [snet]
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3000:3000"]
+    networks: [snet]
+    volumes:
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
+
+volumes:
+  jmx:
+
+networks:
+  snet:import json
+import subprocess
+from pathlib import Path
+from datetime import datetime
+
+RESULTS_DIR = Path(__file__).parent.parent / "results"
+RESULTS_DIR.mkdir(exist_ok=True)
+
+def run_and_time(cmd, outfile):
+    """Run spark-submit in a subprocess and dump timing JSON."""
+    start = datetime.utcnow()
+    proc = subprocess.run(cmd, check=True)
+    end = datetime.utcnow()
+    elapsed = (end - start).total_seconds()
+
+    out = RESULTS_DIR / outfile
+    out.write_text(json.dumps({
+        "cmd": cmd,
+        "utc_start": start.isoformat() + "Z",
+        "utc_end": end.isoformat() + "Z",
+        "elapsed_s": elapsed
+    }, indent=2))
+    print(f"📝  Wrote timing to {out}")
+#!/usr/bin/env python3
+"""
+Distributed PageRank
+--------------------
+Run with:
+
+spark-submit \
+  --master ${SPARK_MASTER_URL} \
+  --deploy-mode client \
+  --total-executor-cores ${TOTAL_CORES} \
+  --executor-memory 256m \
+  /opt/spark-apps/pagerank.py hdfs:///soc-LiveJournal1.txt 10 320
+"""
+import sys
+from pyspark.sql import SparkSession
+
+def main(path, iterations, partitions):
+    spark = (SparkSession.builder
+             .appName("PageRank-LiveJournal")
+             .getOrCreate())
+    sc = spark.sparkContext
+
+    # Load LiveJournal edges, filter comments, partition aggressively
+    raw = sc.textFile(path, minPartitions=partitions)\
+            .filter(lambda l: l and not l.startswith('#'))
+    edges = raw.map(lambda l: tuple(map(int, l.split())))
+    links = edges.distinct().groupByKey().cache()
+
+    # Initialise rank = 1.0 for every node
+    ranks = links.mapValues(lambda _: 1.0)
+
+    for _ in range(iterations):
+        contribs = (links.join(ranks)
+                         .flatMap(lambda kv:
+                                  [(dst, kv[1][1] / len(kv[1][0]))
+                                   for dst in kv[1][0]]))
+        ranks = contribs.reduceByKey(lambda a, b: a + b)\
+                        .mapValues(lambda r: 0.15 + 0.85 * r)
+
+    ranks.toDF(["node", "rank"])\
+         .write.mode("overwrite")\
+         .parquet("hdfs:///pagerank_out")
+
+    spark.stop()
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print("Usage: pagerank.py <path> <iterations> <partitions>", file=sys.stderr)
+        sys.exit(1)
+    main(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
