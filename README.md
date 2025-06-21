@@ -1,20 +1,17 @@
-# Distributed PageRank on LiveJournal (Spark + Docker)
+# Distributed KMeans with Spark & Docker
 
-This repo demonstrates how to run PageRank on a 5 GB social-network graph using
-only Docker Compose, **Spark 3.5**, and 256 MiB executors—complete with
-Prometheus / Grafana monitoring.
+This repository demonstrates how to run K-Means clustering with Apache Spark using Docker Compose. Each Spark worker is limited to 256 MiB of memory and metrics are exported to Prometheus with a Grafana dashboard provided.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/you/distributed-pagerank.git
-cd distributed-pagerank
+git clone https://github.com/you/kmeans-distributed.git
+cd kmeans-distributed
 
 docker compose build
 
-./experiments/run_single.sh          # ~7 min on a laptop
-
-./experiments/run_five.sh            # ~2 min on the same laptop
+./experiments/run_single.sh   # single worker
+./experiments/run_five.sh     # 5 workers
 
 open http://localhost:8080   # Spark UI
 open http://localhost:9090   # Prometheus
@@ -24,11 +21,11 @@ open http://localhost:3000   # Grafana (admin/admin)
 ## Repo layout
 
 ```bash
-
 docker/          – container specs & monitoring
-src/             – PageRank driver code
+spark_kmeans.py  – K-Means driver code
+docs/            – additional usage docs
 experiments/     – helper scripts for 1-, 2- & 5-node runs
-results/         – JSON speed-test output + sample screenshots
-For design rationale, performance numbers, and lessons learned, see REPORT.md.
+results/         – JSON timing output
 ```
----
+
+See `docs/USAGE.md` for detailed usage instructions.

@@ -9,6 +9,7 @@ RUN mkdir -p /opt/jmx && \
 
 COPY spark-env.sh            /opt/bitnami/spark/conf/spark-env.sh
 COPY metrics.properties      /opt/bitnami/spark/conf/metrics.properties
+COPY config.yaml             /opt/jmx/config.yaml
 COPY entrypoint.sh           /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
