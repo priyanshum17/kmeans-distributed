@@ -4,4 +4,4 @@ set -e
 docker compose up -d --build --scale spark-worker=1
 sleep 10
 docker compose exec spark-master \
-  spark-submit /opt/spark-apps/pagerank.py hdfs:///soc-LiveJournal1.txt 10 64
+  spark-submit /opt/spark-apps/spark_kmeans.py --input hdfs:///data/higgs/part-*.csv --k 20

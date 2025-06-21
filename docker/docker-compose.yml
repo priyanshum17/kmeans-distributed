@@ -2,7 +2,8 @@ version: "3.9"
 
 services:
   spark-master:
-    image: bitnami/spark:latest            # official Bitnami Spark image :contentReference[oaicite:0]{index=0}
+    image: bitnami/spark:latest            # official Bitnami Spark image
+    build: ./docker/spark
     hostname: spark-master
     environment:
       - SPARK_MODE=master
@@ -12,6 +13,7 @@ services:
     volumes:
       - ./docker/spark/spark-env.sh:/opt/bitnami/spark/conf/spark-env.sh
       - ./docker/spark/metrics.properties:/opt/bitnami/spark/conf/metrics.properties
+      - ./docker/spark/config.yaml:/opt/jmx/config.yaml
       - ./src:/opt/spark-apps
       - jmx:/opt/jmx
     ports:
@@ -22,6 +24,7 @@ services:
 
   spark-worker:
     image: bitnami/spark:latest
+    build: ./docker/spark
     depends_on: [spark-master]
     environment:
       - SPARK_MODE=worker
@@ -31,6 +34,7 @@ services:
     volumes:
       - ./docker/spark/spark-env.sh:/opt/bitnami/spark/conf/spark-env.sh
       - ./docker/spark/metrics.properties:/opt/bitnami/spark/conf/metrics.properties
+      - ./docker/spark/config.yaml:/opt/jmx/config.yaml
       - jmx:/opt/jmx
     networks: [snet]
     deploy:
