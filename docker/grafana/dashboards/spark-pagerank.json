@@ -1,0 +1,32 @@
+{
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "datasource": "Prometheus",
+      "type": "graph",
+      "title": "Edges / second",
+      "targets": [
+        {
+          "expr": "rate(spark_executor_metrics_input_records_total[30s])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "id": 1
+    },
+    {
+      "datasource": "Prometheus",
+      "type": "graph",
+      "title": "GC Pause (ms)",
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_pause_seconds_sum[30s])*1000",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "id": 2
+    }
+  ],
+  "schemaVersion": 37,
+  "title": "Spark-PageRank",
+  "version": 1
+}
